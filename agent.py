@@ -17,8 +17,46 @@ from support import (MODEL, SYSTEM_PROMPT, call_local, execute_tool, mcp_client,
 MAX_TOOL_CALLS = 8  # Larkspur's own build capped the loop here; then a human takes over.
 
 TONE_ADDENDUM = ""                       # ✏️ Build 4, step 4.1, intelligence goal
-EXTRA_TOOLS: List[Dict[str, Any]] = []   # ✏️ Build 2, step 2.1: schemas for the tools you add
-LOCAL_TOOLS: Dict[str, Any] = {}         # ✏️ Build 2, step 2.1: the functions behind them
+EXTRA_TOOLS: List[Dict[str, Any]] = [    # ✏️ Build 2, step 2.1: schemas for the tools you add
+    {
+        "name": "next_available_day",
+        "description": (
+            "Find the earliest date with an open seat on a route, searching forward from "
+            "the date the customer was booked to travel. Use it when a cancelled or "
+            "stranded customer asks about days rather than flights: 'when is the first "
+            "day I can fly?' or 'how long am I stuck?'. Unlike search_alternatives, which "
+            "lists specific flights to choose from, this returns one date, not a list of "
+            "flights, and it holds and books nothing. It answers for one passenger. Take "
+            "origin, dest, date and cabin from the segment that lookup_booking returned."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "origin": {
+                    "type": "string",
+                    "description": "Three-letter departure airport code from the booking's segment, for example DEN.",
+                },
+                "dest": {
+                    "type": "string",
+                    "description": "Three-letter destination airport code from the booking's segment, for example AUS.",
+                },
+                "date": {
+                    "type": "string",
+                    "description": "The date the customer was booked to travel, as YYYY-MM-DD, for example 2025-05-08. Use the segment date from lookup_booking as-is.",
+                },
+                "cabin": {
+                    "type": "string",
+                    "enum": ["Y", "J"],
+                    "description": "Cabin to search: Y for economy (the default), J for business. Use the cabin on the booking's segment.",
+                },
+            },
+            "required": ["origin", "dest", "date"],
+        },
+    },
+]
+LOCAL_TOOLS: Dict[str, Any] = {          # ✏️ Build 2, step 2.1: the functions behind them
+    "next_available_day": next_available_day,
+}
 
 
 def text_of(response) -> str:
