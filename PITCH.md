@@ -16,3 +16,6 @@ Costs: About $0.03 per conversation, against $6.90 for a person. That is the mod
 Wrong: Today a person finds out by reading the trace, which shows every tool the agent called and what came back. We have no automatic test cases yet, so nothing flags a wrong sentence by itself. The customer is protected on the steps that cannot be undone: a booking needs their own Confirm click, and refunds, hotels and groups go to a person. Ticket G2HL9V went to the group queue in our run.
 Runs it: Not decided. Nobody is named yet to watch, fix or update the agent after our team leaves. What they would own is one file, agent.py, with the loop and seventeen tool descriptions; next_available_day and fare_rules live in Larkspur's own MCP server.
 Left out: Refunds, hotel approval and groups of 10 or more, because the Handbook keeps them with people, so the agent hands over. Special handling for angry customers, because we have not written the tone instructions.
+
+
+Lever: speed
