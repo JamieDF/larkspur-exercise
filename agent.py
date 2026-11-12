@@ -460,18 +460,34 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:            # ‚úèÔ∏
     messages = [
         {"role": "user", "content": f"PNR {pnr}, last name {last_name}. {message}"},
     ]
+    # Cost lever (step 4.1): prompt caching. The tool list and the instructions
+    # are the same on every call, so they go first and are marked for reuse.
+    # The time goes after them, read once per conversation: at the top of the
+    # prompt it changed every second and nothing behind it could be reused.
+    system = [
+        {"type": "text", "text": SYSTEM_PROMPT + TONE_ADDENDUM, "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": runtime_preamble()},
+    ]
 
     response = client.messages.create(
-        model=MODEL, max_tokens=4096, system=runtime_preamble() + SYSTEM_PROMPT + TONE_ADDENDUM,
+        model=MODEL, max_tokens=4096, system=system,
         thinking={"type": "adaptive"}, tools=tools, messages=messages,
     )
 
     turns = 1
+    marked = None   # the one tool result that carries the conversation's cache mark
     while response.stop_reason == "tool_use" and turns < MAX_TOOL_CALLS:
         messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": tool_results(response)})
+        results = tool_results(response)
+        # keep one mark, on the newest tool result, so each turn reuses the turns before it
+        if marked is not None:
+            marked.pop("cache_control", None)
+        if results:
+            marked = results[-1]
+            marked["cache_control"] = {"type": "ephemeral"}
+        messages.append({"role": "user", "content": results})
         response = client.messages.create(
-            model=MODEL, max_tokens=4096, system=runtime_preamble() + SYSTEM_PROMPT + TONE_ADDENDUM,
+            model=MODEL, max_tokens=4096, system=system,
             thinking={"type": "adaptive"}, tools=tools, messages=messages,
         )
         turns += 1
