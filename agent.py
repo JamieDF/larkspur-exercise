@@ -15,81 +15,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 from support import (MODEL, SYSTEM_PROMPT, call_local, execute_tool, mcp_client,
-                     new_session, next_available_day, record_tool_result,
-                     runtime_preamble)
+                     new_session, record_tool_result, runtime_preamble)
 from support import mock_backend as backend   # read-only: Larkspur's data files
 
 MAX_TOOL_CALLS = 8  # Larkspur's own build capped the loop here; then a human takes over.
 
 TONE_ADDENDUM = ""                       # ✏️ Build 4, step 4.1, intelligence goal
 EXTRA_TOOLS: List[Dict[str, Any]] = [    # ✏️ Build 2, step 2.1: schemas for the tools you add
-    {
-        "name": "next_available_day",
-        "description": (
-            "Find the earliest date with an open seat on a route, searching forward from "
-            "the date the customer was booked to travel. Use it when a cancelled or "
-            "stranded customer asks about days rather than flights: 'when is the first "
-            "day I can fly?' or 'how long am I stuck?'. Unlike search_alternatives, which "
-            "lists specific flights to choose from, this returns one date, not a list of "
-            "flights, and it holds and books nothing. It answers for one passenger. Take "
-            "origin, dest, date and cabin from the segment that lookup_booking returned."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "origin": {
-                    "type": "string",
-                    "description": "Three-letter departure airport code from the booking's segment, for example DEN.",
-                },
-                "dest": {
-                    "type": "string",
-                    "description": "Three-letter destination airport code from the booking's segment, for example AUS.",
-                },
-                "date": {
-                    "type": "string",
-                    "description": "The date the customer was booked to travel, as YYYY-MM-DD, for example 2025-05-08. Use the segment date from lookup_booking as-is.",
-                },
-                "cabin": {
-                    "type": "string",
-                    "enum": ["Y", "J"],
-                    "description": "Cabin to search: Y for economy (the default), J for business. Use the cabin on the booking's segment.",
-                },
-            },
-            "required": ["origin", "dest", "date"],
-        },
-    },
-    {
-        "name": "fare_rules",
-        "description": (
-            "Read one section of Larkspur's Handbook: the written fare rules and Customer "
-            "Commitment text that the policy decisions are based on. Use it when the "
-            "customer asks WHY: why they do or do not get a hotel, a meal credit, a refund, "
-            "goodwill or a free change, what their fare family allows, or why chat cannot "
-            "do something. Unlike check_policy, which decides what this one customer is "
-            "owed and returns a policy_row_id, this decides nothing and issues nothing: it "
-            "returns the Handbook wording so you can explain the rule behind the decision. "
-            "Quote or paraphrase only the text it returns, never rules from memory. If the "
-            "answer is not in the returned section, say the Handbook does not cover it."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "section": {
-                    "type": "string",
-                    "enum": ["4", "5", "6", "7"],
-                    "description": (
-                        "Handbook section number. 4: fare families (Basic, Main, Main Plus, "
-                        "First) and what each allows. 5: what happens when Larkspur delays, "
-                        "cancels or diverts a flight (free rebooking windows, refunds, "
-                        "controllable vs uncontrollable causes). 6: care while waiting "
-                        "(meal credits, hotel, ground transport, goodwill, tier extras). "
-                        "7: what chat automation will not do and people handle instead."
-                    ),
-                },
-            },
-            "required": ["section"],
-        },
-    },
     {
         "name": "reopen_stats",
         "description": (
@@ -298,9 +230,11 @@ EXTRA_TOOLS: List[Dict[str, Any]] = [    # ✏️ Build 2, step 2.1: schemas for
 ]
 
 
-def fare_rules(section: str) -> Dict[str, Any]:
-    """The Handbook section with that number, read from fare_rules_excerpt.md.
-    If the file or the section is not there it says so; it never fills in."""
+def handbook_section(section: str) -> Dict[str, Any]:
+    """Not a tool since step 2.2: fare_rules is served over MCP. This helper is
+    what care_entitlements and what_automation_will_not_do read the Handbook with.
+    The section with that number, from fare_rules_excerpt.md. If the file or the
+    section is not there it says so; it never fills in."""
     path = Path(__file__).parent / "data" / "americas" / "fare_rules_excerpt.md"
     try:
         text = path.read_text(encoding="utf-8")
@@ -370,7 +304,7 @@ def care_entitlements(cause_code: str, status: str, delay_minutes: int,
     out = {"source": "disruption_policy.json v%s and Handbook section 6" % policy["version"],
            "policy_row_id": row["policy_row_id"], "cause_class": cause_class, "band": band,
            "care": row["care"], "amounts_are": policy["amount_semantics"],
-           "handbook_section_6": fare_rules("6").get("text", "not readable"),
+           "handbook_section_6": handbook_section("6").get("text", "not readable"),
            "note": "Reference only. Call check_policy for this customer before issuing any voucher."}
     if loyalty_tier:
         out["loyalty_rules_for_tier"] = policy["loyalty_rules"].get(loyalty_tier, "no such tier in the table")
@@ -473,12 +407,10 @@ def hold_time_left(hold_id: str) -> Dict[str, Any]:
 
 def what_automation_will_not_do() -> Dict[str, Any]:
     """Handbook section 7, as written."""
-    return fare_rules("7")
+    return handbook_section("7")
 
 
 LOCAL_TOOLS: Dict[str, Any] = {          # ✏️ Build 2, step 2.1: the functions behind them
-    "next_available_day": next_available_day,
-    "fare_rules": fare_rules,
     "reopen_stats": reopen_stats,
     "care_entitlements": care_entitlements,
     "cause_in_plain_words": cause_in_plain_words,
@@ -548,9 +480,10 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:            # ✏�
 
 
 def tool_list() -> List[Dict[str, Any]]:                   # ✏️ Build 2, step 2.2
-    """Given. Exactly what Claude is offered on every turn; run.py --show-tools
-    prints this list."""
-    return build_tools() + EXTRA_TOOLS
+    """Exactly what Claude is offered on every turn; run.py --show-tools
+    prints this list. The given nine, the team's own, and whatever the MCP
+    server offers (next_available_day and fare_rules)."""
+    return build_tools() + EXTRA_TOOLS + mcp_client.tools()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
